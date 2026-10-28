@@ -16,11 +16,11 @@ inputs:
   cli-version:
     description: 'The tool version to run. Set by each release of this action.'
     required: false
-    default: '__CLI_VERSION__'
+    default: '1.1.2'
   cli-sha256:
     description: 'The SHA-256 of that version. The job stops if the download does not match.'
     required: false
-    default: '__CLI_SHA256__'
+    default: '57cef54bfca333844e6b5193123efc0febddc3ff88e5b9cc849f551c7f42092d'
 
 runs:
   using: composite
