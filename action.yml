@@ -1,0 +1,58 @@
+name: AgentArmor pull request gate
+description: Holds pull requests that add AI tools your company has not approved.
+author: AgentArmor
+branding:
+  icon: shield
+  color: gray-dark
+
+inputs:
+  org-token:
+    description: 'Your organization CI token (starts with aaci_). Create it in your dashboard and keep it in a repository secret.'
+    required: true
+  mode:
+    description: '"strict" holds anything not on your approved list. "soft" holds only what you block, and warns about the rest.'
+    required: false
+    default: 'strict'
+  cli-version:
+    description: 'The tool version to run. Set by each release of this action.'
+    required: false
+    default: '__CLI_VERSION__'
+  cli-sha256:
+    description: 'The SHA-256 of that version. The job stops if the download does not match.'
+    required: false
+    default: '__CLI_SHA256__'
+
+runs:
+  using: composite
+  steps:
+    - name: Check the pull request against your approved list
+      shell: bash
+      env:
+        AGENTARMOR_ORG_TOKEN: ${{ inputs.org-token }}
+        AA_MODE: ${{ inputs.mode }}
+        AA_VERSION: ${{ inputs.cli-version }}
+        AA_SHA256: ${{ inputs.cli-sha256 }}
+      run: |
+        set -euo pipefail
+        fail() { echo "::error title=AgentArmor::$1"; exit 2; }
+
+        [ -n "${AGENTARMOR_ORG_TOKEN:-}" ] || fail "org-token is empty. Save your CI token as a repository secret and pass it in."
+        case "$AA_MODE" in strict|soft) ;; *) fail "mode must be strict or soft." ;; esac
+        case "$AA_VERSION" in *__*|"") fail "This copy of the action has no tool version set. Use a tagged release." ;; esac
+        printf '%s' "$AA_VERSION" | grep -Eq '^[0-9A-Za-z._-]+$' || fail "cli-version has characters that are not allowed."
+        printf '%s' "$AA_SHA256" | grep -Eq '^[0-9a-f]{64}$' || fail "cli-sha256 must be 64 lowercase hex characters."
+
+        DIR="$(mktemp -d)"
+        FILE="$DIR/agentarmor.mjs"
+        curl -fsSL --proto '=https' --tlsv1.2 "https://agentarmorhq.com/api/cli?v=${AA_VERSION}" -o "$FILE" \
+          || fail "Could not download the tool. The job stops so nothing goes unchecked."
+
+        if command -v sha256sum >/dev/null 2>&1; then
+          GOT="$(sha256sum "$FILE" | cut -d' ' -f1)"
+        else
+          GOT="$(shasum -a 256 "$FILE" | cut -d' ' -f1)"
+        fi
+        [ "$GOT" = "$AA_SHA256" ] || fail "The downloaded tool does not match the expected SHA-256. Not running it."
+
+        cd "$GITHUB_WORKSPACE"
+        node "$FILE" gate --github "--$AA_MODE"
